@@ -5,7 +5,6 @@ import { AuthHelper } from '@auth/helpers/auth.helper';
 import { JwtModule } from '@nestjs/jwt';
 import { RedisService } from '@common/services/redis.service';
 
-
 @Module({
   imports: [JwtModule.register({})],
   controllers: [AuthController],

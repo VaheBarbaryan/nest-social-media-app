@@ -7,12 +7,12 @@ import cookieParser from 'cookie-parser';
 import compression from 'compression';
 import { LoggerInterceptor, ResponseInterceptor } from '@common/interceptors';
 import {
-  ArgumentsHost,
   BadRequestException,
   ValidationError,
   ValidationPipe,
 } from '@nestjs/common';
-import { formatValidationErrors } from './common/helpers/formatValidationErrors.helper';
+import { formatValidationErrors } from '@common/helpers/formatValidationErrors.helper';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -59,6 +59,17 @@ async function bootstrap() {
     }),
   );
   app.useGlobalInterceptors(new LoggerInterceptor(), new ResponseInterceptor());
+
+  if (configService.get('NODE_ENV') === 'development') {
+    const config = new DocumentBuilder()
+      .setTitle('Social App API')
+      .setDescription('Social App API')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .build();
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api-docs', app, document);
+  }
 
   await app.listen(PORT);
   return PORT
