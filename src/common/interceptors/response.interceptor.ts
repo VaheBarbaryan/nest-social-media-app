@@ -19,8 +19,6 @@ export class ResponseInterceptor implements NestInterceptor {
         let status = HttpStatus.INTERNAL_SERVER_ERROR;
         let data = {};
 
-        console.log('Err: ', JSON.stringify(err, null, 2));
-
         if (typeof err.getStatus === 'function') {
           status = err.getStatus();
         }
