@@ -1,19 +1,22 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { DatabaseService } from '@database/database.service';
 import { PaginationUtil } from '@common/utils/pagination.util';
+import { User } from '@common/interfaces/user.interface';
+import { PaginationResult } from '@common/interfaces/paginationResult.interface';
+import { PendingRequest } from '@common/interfaces/pendingRequest.interface';
 
 @Injectable()
 export class UsersService {
   constructor(private readonly databaseService: DatabaseService) {}
 
-  async getUsers(search?: string, page = 1, limit = 10) {
+  async getUsers(userId: number, search?: string, page = 1, limit = 10) {
     if (page < 1 || limit < 1) {
       throw new BadRequestException('Page and limit must be positive integers');
     }
 
     const offset = (page - 1) * limit;
 
-    const query = this.databaseService.db('users').select(
+    const query = this.databaseService.db('users').where('id', '<>', userId).select(
       'id',
       'email',
       'first_name',
@@ -22,7 +25,10 @@ export class UsersService {
       'created_at',
     );
 
-    const countQuery = this.databaseService.db('users').count('* as total').first();
+    const countQuery = this.databaseService.db('users')
+      .where('id', '<>', userId)
+      .count('* as total')
+      .first();
 
     if (search) {
       const searchAsNumber = Number(search);
@@ -58,12 +64,73 @@ export class UsersService {
       users,
       Number(total),
       page,
-      limit,
+      limit, 
     );
   }
 
-  async getPendingRequests(userId: number): Promise<any[]> {
-    return this.databaseService
+  async getFriends(userId: number, search?: string, page = 1, limit = 10): Promise<PaginationResult<User>> {
+    if (page < 1 || limit < 1) {
+      throw new BadRequestException('Page and limit must be positive integers');
+    }
+
+    const offset = (page - 1) * limit;
+
+    const friendsSubquery = this.databaseService.db('friends')
+      .select(
+        this.databaseService.db.raw(`CASE 
+        WHEN user_id_1 = ? THEN user_id_2 
+        ELSE user_id_1 
+      END`, [userId])
+          .wrap('(', ') as friend_id')
+      )
+      .where((builder) => {
+        builder.where('user_id_1', userId).orWhere('user_id_2', userId);
+      });
+
+    const baseQuery = this.databaseService.db('users')
+      .whereIn('id', friendsSubquery)
+      .select('id', 'email', 'first_name', 'last_name', 'age', 'created_at');
+
+    const countQuery = this.databaseService.db('users')
+      .whereIn('id', friendsSubquery)
+      .count('* as total')
+      .first();
+
+    if (search) {
+      const searchAsNumber = Number(search);
+      const isNumericSearch = !isNaN(searchAsNumber) && search.trim() !== '';
+
+      baseQuery.andWhere((builder) => {
+        builder
+          .where('email', 'ilike', `%${search}%`)
+          .orWhere('first_name', 'ilike', `%${search}%`)
+          .orWhere('last_name', 'ilike', `%${search}%`);
+        if (isNumericSearch) {
+          builder.orWhere('age', '=', searchAsNumber);
+        }
+      });
+
+      countQuery.andWhere((builder) => {
+        builder
+          .where('email', 'ilike', `%${search}%`)
+          .orWhere('first_name', 'ilike', `%${search}%`)
+          .orWhere('last_name', 'ilike', `%${search}%`);
+        if (isNumericSearch) {
+          builder.orWhere('age', '=', searchAsNumber);
+        }
+      });
+    }
+
+    const [friends, { total }] = await Promise.all([
+      baseQuery.offset(offset).limit(limit),
+      countQuery,
+    ]);
+
+    return PaginationUtil.createPaginationResult(friends, Number(total), page, limit);
+  }
+
+  async getPendingRequests(userId: number): Promise<PendingRequest[]> {
+    return await this.databaseService
       .db('friend_requests')
       .join('users', 'friend_requests.sender_id', 'users.id')
       .select(
@@ -76,6 +143,7 @@ export class UsersService {
       )
       .where('friend_requests.receiver_id', userId);
   }
+
 
   async addFriend(senderId: number, receiverId: number): Promise<void> {
     if (senderId === receiverId) {
@@ -116,7 +184,6 @@ export class UsersService {
   }
 
   async acceptFriendRequest(userId: number, requestId: number): Promise<void> {
-    console.log('requestId', requestId);
     const request = await this.databaseService
       .db('friend_requests')
       .where({ id: requestId, receiver_id: userId })
